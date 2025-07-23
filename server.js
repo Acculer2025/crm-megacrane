@@ -11,7 +11,7 @@ const app = express();
 app.use(cors());
 
 const corsOptions = {
-  origin: ["https://megacarne-frontend.vercel.app"],
+  origin: ["https://crm.megacrane.acculermedia.in"],
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
