@@ -9,14 +9,12 @@ const app = express();
 // ✅ Middleware
 
 app.use(cors());
-
 const corsOptions = {
   origin: ["https://crm.megacrane.acculermedia.in"],
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
-
 app.use(cors(corsOptions));
 app.use(express.json());
 
