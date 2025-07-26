@@ -45,7 +45,7 @@ const businessAccountSchema = new mongoose.Schema({
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: { type: String, enum: ['Active', 'Inactive', 'Pipeline', 'Closed', 'Customer', 'Quotations'], default: 'Active' },
     isCustomer: { type: Boolean, default: false }, // Indicates if the account is a customer
-    selectedProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null }, // NEW: Reference to Product
+    selectedProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },    // NEW: Reference to Product
 }, { timestamps: true });
 
 module.exports = mongoose.model('BusinessAccount', businessAccountSchema);
