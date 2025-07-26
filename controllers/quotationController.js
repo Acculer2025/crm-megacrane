@@ -40,7 +40,7 @@ const calculateTotalGst = (items, gstType) => {
 };
 
 // Helper function to calculate the final total, applying manual overrides
-const calculateTotal = (subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage) => {
+const calculateTotal = (subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage, manualIgstPercentage) => {
   let taxToUse = 0;
 
   if (manualGstAmount !== null && manualGstAmount !== undefined) {
@@ -51,6 +51,8 @@ const calculateTotal = (subTotal, gstBreakdown, gstType, manualGstAmount, manual
       const manualSgstValue = manualSgstPercentage !== null && manualSgstPercentage !== undefined ? (subTotal * (manualSgstPercentage / 100)) : gstBreakdown.sgst;
       const manualCgstValue = manualCgstPercentage !== null && manualCgstPercentage !== undefined ? (subTotal * (manualCgstPercentage / 100)) : gstBreakdown.cgst;
       taxToUse = manualSgstValue + manualCgstValue;
+  } else if (gstType === "interstate" && (manualIgstPercentage !== null && manualIgstPercentage !== undefined)) {
+      taxToUse = subTotal * (manualIgstPercentage / 100);
   } else {
       // Otherwise, use the automatically calculated total GST
       taxToUse = gstBreakdown.totalGst;
@@ -91,16 +93,22 @@ exports.getAll = async (req, res) => {
 // POST create new quotation
 exports.create = async (req, res) => {
   try {
-    const { items, businessId, customerName, customerEmail, mobileNumber, gstin, gstType, quotationDate, validityDays, quotationNotes, businessInfo, manualGstAmount, manualSgstPercentage, manualCgstPercentage } = req.body;
+    const { items, businessId, customerName, customerEmail,
+      gstType, date, validUntil, notes, status, // Renamed from quotationDate, validityDays, quotationNotes
+      manualGstAmount, manualSgstPercentage, manualCgstPercentage, manualIgstPercentage,
+      quotationNumber // Added quotationNumber to allow frontend to set it
+    } = req.body;
 
-    // Fetch the last quotation to determine the next quotation number
-    const lastQuotation = await Quotation.findOne().sort({ createdAt: -1 });
-    let nextQuotationNumber;
-    if (lastQuotation && lastQuotation.quotationNumber) {
-      const lastNumber = parseInt(lastQuotation.quotationNumber.split('-').pop());
-      nextQuotationNumber = `Q-${(lastNumber + 1).toString().padStart(5, '0')}`;
-    } else {
-      nextQuotationNumber = 'Q-00001';
+    // Use quotationNumber from frontend if provided, otherwise generate
+    let finalQuotationNumber = quotationNumber;
+    if (!finalQuotationNumber) {
+        const lastQuotation = await Quotation.findOne().sort({ createdAt: -1 });
+        if (lastQuotation && lastQuotation.quotationNumber) {
+            const lastNum = parseInt(lastQuotation.quotationNumber.split('-').pop());
+            finalQuotationNumber = `Q-${(lastNum + 1).toString().padStart(5, '0')}`;
+        } else {
+            finalQuotationNumber = 'Q-00001';
+        }
     }
 
     // Calculate subTotal
@@ -110,28 +118,40 @@ exports.create = async (req, res) => {
     const gstBreakdown = calculateTotalGst(items, gstType);
 
     // Calculate total, applying manual overrides if present
-    const total = calculateTotal(subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage);
+    const total = calculateTotal(subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage, manualIgstPercentage);
+
+    // Fetch business details only if needed for fallback
+    let businessDetails = null;
+    if (businessId) {
+      businessDetails = await Business.findById(businessId);
+    }
 
     const newQuotation = new Quotation({
-      quotationNumber: nextQuotationNumber,
+      quotationNumber: finalQuotationNumber, // Use the determined quotation number
       businessId,
-      customerName: customerName || (businessId ? (await Business.findById(businessId))?.contactName : null),
-      customerEmail: customerEmail || (businessId ? (await Business.findById(businessId))?.email : null),
-      mobileNumber: mobileNumber || (businessId ? (await Business.findById(businessId))?.mobileNumber || (await Business.findById(businessId))?.phone : null),
-      gstin: gstin || (businessId ? (await Business.findById(businessId))?.gstin : null),
+      // Prioritize customerName/Email from body, fallback to business details
+      customerName: customerName || businessDetails?.contactName || null,
+      customerEmail: customerEmail || businessDetails?.email || null,
+      mobileNumber: businessDetails?.mobileNumber || businessDetails?.phone || null,
+      gstin: businessDetails?.gstNumber || null, // Changed from gstin to gstNumber to match Business schema likely
       gstType,
       items,
       subTotal,
       gstBreakdown,
       total,
-      date: quotationDate || new Date(),
-      validityDays,
-      notes: quotationNotes ? [{ text: quotationNotes, author: req.user.name }] : [], // Assuming req.user is populated by auth middleware
-      businessInfo,
-      status: 'Pending',
+      date: date || new Date(), // Use 'date' from frontend, fallback to new Date
+      validUntil: validUntil || null, // Use 'validUntil' from frontend
+      // Ensure notes are handled as an array of objects
+      notes: notes && notes.length > 0 ? notes.map(note => ({
+        ...note,
+        author: note.author || req.user?.name || 'System', // Safely access req.user.name or default
+        timestamp: note.timestamp || new Date()
+      })) : [],
+      status: status || 'Draft', // Use 'status' from frontend, fallback to 'Draft'
       manualGstAmount,
       manualSgstPercentage,
       manualCgstPercentage,
+      manualIgstPercentage, // Store manualIgstPercentage
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -159,17 +179,40 @@ exports.update = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found.' });
     }
 
+    // Merge incoming notes with existing notes
+    if (updateData.notes && Array.isArray(updateData.notes) && updateData.notes.length > 0) {
+      updateData.notes.forEach(newNote => {
+        if (newNote.text) {
+          quotation.notes.push({
+            text: newNote.text,
+            author: newNote.author || req.user?.name || 'System', // Safely access req.user.name or default
+            timestamp: newNote.timestamp || new Date()
+          });
+        }
+      });
+      delete updateData.notes; // Prevent direct overwrite by mongoose
+    }
+
     // Recalculate totals if items or GST related fields are updated
-    if (updateData.items || updateData.gstType !== undefined || updateData.manualGstAmount !== undefined || updateData.manualSgstPercentage !== undefined || updateData.manualCgstPercentage !== undefined) {
-      const itemsToUse = updateData.items || quotation.items;
-      const gstTypeToUse = updateData.gstType !== undefined ? updateData.gstType : quotation.gstType;
-      const manualGstAmountToUse = updateData.manualGstAmount !== undefined ? updateData.manualGstAmount : quotation.manualGstAmount;
-      const manualSgstPercentageToUse = updateData.manualSgstPercentage !== undefined ? updateData.manualSgstPercentage : quotation.manualSgstPercentage;
-      const manualCgstPercentageToUse = updateData.manualCgstPercentage !== undefined ? updateData.manualCgstPercentage : quotation.manualCgstPercentage;
+    const itemsChanged = updateData.items !== undefined;
+    const gstTypeChanged = updateData.gstType !== undefined;
+    const manualGstAmountChanged = updateData.manualGstAmount !== undefined;
+    const manualSgstPercentageChanged = updateData.manualSgstPercentage !== undefined;
+    const manualCgstPercentageChanged = updateData.manualCgstPercentage !== undefined;
+    const manualIgstPercentageChanged = updateData.manualIgstPercentage !== undefined;
+
+
+    if (itemsChanged || gstTypeChanged || manualGstAmountChanged || manualSgstPercentageChanged || manualCgstPercentageChanged || manualIgstPercentageChanged) {
+      const itemsToUse = itemsChanged ? updateData.items : quotation.items;
+      const gstTypeToUse = gstTypeChanged ? updateData.gstType : quotation.gstType;
+      const manualGstAmountToUse = manualGstAmountChanged ? updateData.manualGstAmount : quotation.manualGstAmount;
+      const manualSgstPercentageToUse = manualSgstPercentageChanged ? updateData.manualSgstPercentage : quotation.manualSgstPercentage;
+      const manualCgstPercentageToUse = manualCgstPercentageChanged ? updateData.manualCgstPercentage : quotation.manualCgstPercentage;
+      const manualIgstPercentageToUse = manualIgstPercentageChanged ? updateData.manualIgstPercentage : quotation.manualIgstPercentage;
 
       const newSubTotal = calculateSubTotal(itemsToUse);
       const newGstBreakdown = calculateTotalGst(itemsToUse, gstTypeToUse);
-      const newTotal = calculateTotal(newSubTotal, newGstBreakdown, gstTypeToUse, manualGstAmountToUse, manualSgstPercentageToUse, manualCgstPercentageToUse);
+      const newTotal = calculateTotal(newSubTotal, newGstBreakdown, gstTypeToUse, manualGstAmountToUse, manualSgstPercentageToUse, manualCgstPercentageToUse, manualIgstPercentageToUse);
 
       quotation.subTotal = newSubTotal;
       quotation.gstBreakdown = newGstBreakdown;
@@ -179,29 +222,14 @@ exports.update = async (req, res) => {
       quotation.manualGstAmount = manualGstAmountToUse;
       quotation.manualSgstPercentage = manualSgstPercentageToUse;
       quotation.manualCgstPercentage = manualCgstPercentageToUse;
-    }
-
-    // Handle notes separately if they are being added
-    if (updateData.notes && updateData.notes.length > 0) {
-      // Assuming 'notes' here refers to adding new notes, not replacing old ones
-      // You might need more sophisticated logic here based on your frontend's note management
-      updateData.notes.forEach(newNote => {
-        if (newNote.text) {
-          quotation.notes.push({
-            text: newNote.text,
-            author: req.user.name, // Assuming req.user is populated by auth middleware
-            timestamp: new Date()
-          });
-        }
-      });
-      delete updateData.notes; // Remove from updateData to prevent direct overwrite
+      quotation.manualIgstPercentage = manualIgstPercentageToUse; // Update manualIgstPercentage
     }
 
 
     // Apply other updates
     Object.keys(updateData).forEach(key => {
       // Prevent overwriting calculated fields or specific fields not meant for direct update here
-      if (key !== 'items' && key !== 'subTotal' && key !== 'gstBreakdown' && key !== 'total' && key !== 'createdAt' && key !== 'notes') {
+      if (key !== 'items' && key !== 'subTotal' && key !== 'gstBreakdown' && key !== 'total' && key !== 'createdAt' && key !== 'notes' && key !== 'manualIgstPercentage') {
         quotation[key] = updateData[key];
       }
     });
@@ -296,7 +324,7 @@ exports.addFollowUp = async (req, res) => {
       date,
       note,
       status: status || 'Pending', // Default status
-      addedBy: req.user._id, // Assuming user ID is available from authentication middleware
+      addedBy: req.user?._id, // Safely access req.user._id
       timestamp: new Date()
     });
 
