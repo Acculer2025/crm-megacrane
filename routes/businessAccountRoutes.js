@@ -1,16 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/businessAccountController');
-const User = require('../models/User');
+const User = require('../models/User'); // Assuming User model path
 
 // Route to get all users for "Assigned To" dropdown
 router.get('/users/all', async (req, res) => {
-  try {
-    const users = await User.find({}, 'name role');
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    try {
+        const users = await User.find({}, 'name role');
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Route to get quotations sent

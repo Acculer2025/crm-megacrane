@@ -1,5 +1,5 @@
 const BusinessAccount = require('../models/BusinessAccount');
-const Quotation = require('../models/Quotation');
+const Quotation = require('../models/Quotation'); // Assuming Quotation model is used elsewhere or will be.
 
 // Get all accounts (leads + customers) - This can be deprecated if using getPaginatedAccounts for all list views
 exports.getAll = async (req, res) => {
@@ -75,7 +75,7 @@ exports.getLeadsBySource = async (req, res) => {
             status: { $ne: 'Customer' },
             sourceType: sourceType
         }).populate('assignedTo', 'name role')
-          .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price');
         res.json(leads);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching leads by source', error: error.message });
@@ -85,7 +85,7 @@ exports.getLeadsBySource = async (req, res) => {
 // Get only active leads (not customers)
 exports.getActiveLeads = async (req, res) => {
     try {
-          const leads = await BusinessAccount.find({ status: 'Active' })
+        const leads = await BusinessAccount.find({ status: 'Active' })
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
             .populate('selectedProduct', 'productName price');
@@ -124,10 +124,26 @@ exports.getAccountById = async (req, res) => {
     }
 };
 
-// CREATE new business account
 exports.create = async (req, res) => {
     try {
         const data = { ...req.body };
+
+        // Check for existing businessName (case-insensitive)
+        const existingAccount = await BusinessAccount.findOne({
+            businessName: { $regex: new RegExp(`^${data.businessName}$`, 'i') }
+        }).populate('assignedTo', 'name role'); // Crucial: Populate assignedTo here
+
+        if (existingAccount) {
+            return res.status(409).json({ // 409 Conflict status code is appropriate here
+                message: `An account with this business name already exists. It is currently assigned to ${existingAccount.assignedTo ? existingAccount.assignedTo.name : 'an unassigned user'}.`,
+                existingAccount: existingAccount._id, // Optionally return the ID of the existing account
+                assignedTo: existingAccount.assignedTo ? {
+                    name: existingAccount.assignedTo.name,
+                    role: existingAccount.assignedTo.role
+                } : null // Send assigned user info back
+            });
+        }
+
         if (data.status === 'Customer') {
             data.isCustomer = true;
         } else {
@@ -147,7 +163,6 @@ exports.create = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
 // UPDATE business account
 exports.update = async (req, res) => {
     try {
@@ -163,7 +178,7 @@ exports.update = async (req, res) => {
             data,
             { new: true, runValidators: true }
         ).populate('assignedTo', 'name role')
-         .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price');
 
         if (!updated) {
             return res.status(404).json({ message: 'Account not found' });
