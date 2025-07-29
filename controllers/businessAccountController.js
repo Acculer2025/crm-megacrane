@@ -67,6 +67,57 @@ exports.getPaginatedAccounts = async (req, res) => {
     }
 };
 
+// NEW FUNCTION: Get aggregated counts for all account statuses
+exports.getAccountCounts = async (req, res) => {
+  try {
+    let matchQuery = {};
+    // Apply role-based filtering for Employees to counts as well
+    if (req.query.role === 'Employee' && req.query.userId) {
+      matchQuery.assignedTo = req.query.userId;
+    }
+
+    const counts = await BusinessAccount.aggregate([
+      { $match: matchQuery }, // Apply user/role filter first if needed
+      {
+        $facet: {
+          all: [{ $count: 'total' }],
+          active: [{ $match: { status: 'Active' } }, { $count: 'total' }], // 'Lead' tab corresponds to 'Active' status
+          Pipeline: [{ $match: { status: 'Pipeline' } }, { $count: 'total' }], // 'Enquiry' tab corresponds to 'Pipeline' status
+          quotations: [{ $match: { status: 'Quotations' } }, { $count: 'total' }],
+          customers: [{ $match: { status: 'Customer' } }, { $count: 'total' }], // 'Converted' tab corresponds to 'Customer' status
+          closed: [{ $match: { status: 'Closed' } }, { $count: 'total' }],
+        },
+      },
+      {
+        $project: {
+          all: { $arrayElemAt: ['$all.total', 0] },
+          active: { $arrayElemAt: ['$active.total', 0] },
+          Pipeline: { $arrayElemAt: ['$Pipeline.total', 0] },
+          quotations: { $arrayElemAt: ['$quotations.total', 0] },
+          customers: { $arrayElemAt: ['$customers.total', 0] },
+          closed: { $arrayElemAt: ['$closed.total', 0] },
+        },
+      },
+    ]);
+
+    // Format the result to return 0 if a count is undefined (e.g., no accounts for a specific status)
+    const formattedCounts = {
+      all: counts[0]?.all || 0,
+      active: counts[0]?.active || 0,
+      Pipeline: counts[0]?.Pipeline || 0,
+      quotations: counts[0]?.quotations || 0,
+      customers: counts[0]?.customers || 0,
+      closed: counts[0]?.closed || 0,
+    };
+
+    res.status(200).json(formattedCounts);
+  } catch (error) {
+    console.error('Error fetching account counts:', error);
+    res.status(500).json({ message: 'Error fetching account counts', error: error.message });
+  }
+};
+
+
 // Get leads by source type
 exports.getLeadsBySource = async (req, res) => {
     try {

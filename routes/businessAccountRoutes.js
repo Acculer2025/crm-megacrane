@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const controller = require('../controllers/businessAccountController');
+const controller = require('../controllers/businessAccountController'); // Assuming this is businessAccountController, not just accountController
 const User = require('../models/User'); // Assuming User model path
 
 // Route to get all users for "Assigned To" dropdown
-router.get('/users/all', async (req, res) => {
+router.get('/users', async (req, res) => { // Changed from /users/all to /users for consistency
     try {
         const users = await User.find({}, 'name role');
         res.json(users);
@@ -18,6 +18,9 @@ router.get('/quotations', controller.getQuotationsSent);
 
 // NEW ROUTE: Get paginated and filtered business accounts
 router.get('/paginated', controller.getPaginatedAccounts);
+
+// NEW ROUTE: Get aggregated counts for all account statuses
+router.get('/counts', controller.getAccountCounts);
 
 // GET all business accounts (Can be deprecated if '/paginated' is used for all list views)
 router.get('/', controller.getAll);
