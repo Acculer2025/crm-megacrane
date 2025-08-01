@@ -7,7 +7,6 @@ const connectDB = require('./config/db');
 const app = express();
 
 // ✅ Middleware
-
 app.use(cors());
 const corsOptions = {
   origin: ["https://crm.megacrane.acculermedia.in"],
@@ -26,15 +25,18 @@ const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
 const productRoutes = require('./routes/productRoutes');
 
-const departmentRoutes = require('./routes/departmentRoutes'); // New
+const departmentRoutes = require('./routes/departmentRoutes'); 
 const teamRoutes = require('./routes/teamRoutes'); 
+const zoneRoutes = require('./routes/zoneRoutes'); // New: Import zoneRoutes
+
 // ✅ Route mounting
 app.use('/api/auth', authRoutes);
-app.use('/api/departments', departmentRoutes); // New
+app.use('/api/departments', departmentRoutes); 
 app.use('/api/teams', teamRoutes);
-app.use('/api/accounts', businessRoutes);       // BusinessAccount API
-app.use('/api/quotations', quotationRoutes);    // Quotations API
-app.use('/api/invoices', invoiceRoutes);        // Invoices API
+app.use('/api/zones', zoneRoutes); // New: Mount zoneRoutes
+app.use('/api/accounts', businessRoutes);
+app.use('/api/quotations', quotationRoutes);
+app.use('/api/invoices', invoiceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api', productRoutes);
 

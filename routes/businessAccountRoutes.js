@@ -1,16 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const controller = require('../controllers/businessAccountController'); // Assuming this is businessAccountController, not just accountController
+const controller = require('../controllers/businessAccountController');
 const User = require('../models/User'); // Assuming User model path
+const Zone = require('../models/Zone'); // Assuming Zone model exists
 
 // Route to get all users for "Assigned To" dropdown
-router.get('/users', async (req, res) => { // Changed from /users/all to /users for consistency
-    try {
-        const users = await User.find({}, 'name role');
-        res.json(users);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+router.get('/users', async (req, res) => {
+    try {
+        const users = await User.find({}, 'name role');
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// NEW ROUTE: Get all zones for "Zone" dropdown
+router.get('/zones', async (req, res) => {
+    try {
+        const zones = await Zone.find({}, 'name');
+        res.json(zones);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Route to get quotations sent

@@ -20,11 +20,11 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true // Password should be required for new users
+    required: true
   },
   role: {
     type: String,
-    enum: ['Superadmin', 'Admin', 'Team Leader', 'Employee'], // Added 'Team Leader' role
+    enum: ['Superadmin', 'Admin', 'Team Leader', 'Employee'],
     default: 'Employee'
   },
   status: {
@@ -32,19 +32,21 @@ const userSchema = new mongoose.Schema({
     enum: ['Active', 'Inactive'],
     default: 'Active'
   },
-  department: { // NEW: Reference to Department
+  department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department',
     default: null
   },
-  team: { // NEW: Reference to Team (crucial for tracking user's team assignment)
+  team: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Team',
     default: null
+  },
+  zone: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Zone',
+    default: null
   }
 }, { timestamps: true });
-
-// You might want to add pre-save hooks for password hashing here if not already present.
-// For simplicity, it's omitted in this update but highly recommended for production.
 
 module.exports = mongoose.model('User', userSchema);

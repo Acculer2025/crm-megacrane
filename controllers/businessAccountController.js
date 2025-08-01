@@ -1,3 +1,5 @@
+// File: controllers/accountController.js
+
 const BusinessAccount = require('../models/BusinessAccount');
 const Quotation = require('../models/Quotation'); // Assuming Quotation model is used elsewhere or will be.
 
@@ -7,7 +9,8 @@ exports.getAll = async (req, res) => {
         const accounts = await BusinessAccount.find()
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name'); // Added zone population
         res.json(accounts);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -17,7 +20,7 @@ exports.getAll = async (req, res) => {
 // NEW FUNCTION: Get paginated and filtered accounts (leads + customers)
 exports.getPaginatedAccounts = async (req, res) => {
     try {
-        const { page = 1, pageSize = 10, search = '', status, sortBy = 'createdAt', sortOrder = 'desc', userId, role } = req.query;
+        const { page = 1, pageSize = 10, search = '', status, sortBy = 'createdAt', sortOrder = 'desc', userId, role, zone } = req.query;
 
         const skip = (parseInt(page) - 1) * parseInt(pageSize);
         const limit = parseInt(pageSize);
@@ -30,9 +33,13 @@ exports.getPaginatedAccounts = async (req, res) => {
         }
 
         // Apply status filter if provided
-        // Assuming 'status' from frontend tabs corresponds directly to Mongoose query
-        if (status && status !== 'all') { // 'all' is a frontend concept, not a status in DB
+        if (status && status !== 'all') {
             query.status = status;
+        }
+
+        // Apply zone filter if provided
+        if (zone) {
+            query.zone = zone;
         }
 
         // Apply search filter (case-insensitive regex for businessName and contactName)
@@ -49,9 +56,10 @@ exports.getPaginatedAccounts = async (req, res) => {
         // Fetch accounts with pagination, sorting, and population
         const accounts = await BusinessAccount.find(query)
             .populate('assignedTo', 'name role')
-            .populate('followUps.addedBy', 'name') // Populate notes authors if needed
+            .populate('followUps.addedBy', 'name')
             .populate('selectedProduct', 'productName price')
-            .sort({ [sortBy]: sortOrder === 'asc' ? 1 : -1 }) // Dynamic sorting
+            .populate('zone', 'name') // Added zone population
+            .sort({ [sortBy]: sortOrder === 'asc' ? 1 : -1 })
             .skip(skip)
             .limit(limit);
 
@@ -76,8 +84,13 @@ exports.getAccountCounts = async (req, res) => {
       matchQuery.assignedTo = req.query.userId;
     }
 
+    // Apply zone filter if provided
+    if (req.query.zone) {
+      matchQuery.zone = req.query.zone;
+    }
+
     const counts = await BusinessAccount.aggregate([
-      { $match: matchQuery }, // Apply user/role filter first if needed
+      { $match: matchQuery }, // Apply user/role and zone filter first
       {
         $facet: {
           all: [{ $count: 'total' }],
@@ -117,7 +130,6 @@ exports.getAccountCounts = async (req, res) => {
   }
 };
 
-
 // Get leads by source type
 exports.getLeadsBySource = async (req, res) => {
     try {
@@ -126,7 +138,8 @@ exports.getLeadsBySource = async (req, res) => {
             status: { $ne: 'Customer' },
             sourceType: sourceType
         }).populate('assignedTo', 'name role')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         res.json(leads);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching leads by source', error: error.message });
@@ -139,7 +152,8 @@ exports.getActiveLeads = async (req, res) => {
         const leads = await BusinessAccount.find({ status: 'Active' })
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         res.json(leads);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -152,7 +166,8 @@ exports.getCustomers = async (req, res) => {
         const customers = await BusinessAccount.find({ status: 'Customer' })
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         res.json(customers);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -165,7 +180,8 @@ exports.getAccountById = async (req, res) => {
         const account = await BusinessAccount.findById(req.params.id)
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         if (!account) {
             return res.status(404).json({ message: 'Account not found' });
         }
@@ -205,7 +221,8 @@ exports.create = async (req, res) => {
         const savedAccount = await newAccount.save();
         const populatedAccount = await BusinessAccount.findById(savedAccount._id)
             .populate('assignedTo', 'name role')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         res.status(201).json(populatedAccount);
     } catch (err) {
         if (err.name === 'ValidationError') {
@@ -229,7 +246,8 @@ exports.update = async (req, res) => {
             data,
             { new: true, runValidators: true }
         ).populate('assignedTo', 'name role')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
 
         if (!updated) {
             return res.status(404).json({ message: 'Account not found' });
@@ -248,7 +266,8 @@ exports.getQuotationsSent = async (req, res) => {
         const quotations = await BusinessAccount.find({ status: 'Quotations' })
             .populate('assignedTo', 'name role')
             .populate('followUps.addedBy', 'name')
-            .populate('selectedProduct', 'productName price');
+            .populate('selectedProduct', 'productName price')
+            .populate('zone', 'name');
         res.json(quotations);
     } catch (err) {
         res.status(500).json({ error: err.message });

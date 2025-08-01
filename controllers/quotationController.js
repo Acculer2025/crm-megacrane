@@ -1,310 +1,150 @@
 // quotationController.js
 const Quotation = require('../models/Quotation');
-const Business = require('../models/BusinessAccount');
+const Business = require('../models/BusinessAccount'); // Ensure BusinessAccount is imported if used by getActiveBusinesses
 
-// Helper function to format currency (for internal use if needed, but not directly for saving)
-const formatCurrency = (amount) => {
-  return parseFloat(Number(amount || 0).toFixed(2));
-};
-
-// Helper function to calculate sub-total
-const calculateSubTotal = (items) => {
-  return items.reduce((sum, i) => sum + (i.quantity || 0) * (i.rate || 0), 0);
-};
-
-// Helper function to calculate GST breakdown
-const calculateTotalGst = (items, gstType) => {
-  let totalCalculatedGst = items.reduce((sum, i) => {
-    const itemTotal = (i.quantity || 0) * (i.rate || 0);
-    const gstRate = (i.gstPercentage || 0) / 100; // Convert percentage to decimal
-    return sum + itemTotal * gstRate;
-  }, 0);
-
-  let sgst = 0;
-  let cgst = 0;
-  let igst = 0;
-
-  if (gstType === "intrastate") {
-    sgst = totalCalculatedGst / 2;
-    cgst = totalCalculatedGst / 2;
-  } else if (gstType === "interstate") {
-    igst = totalCalculatedGst;
-  }
-
-  return {
-    totalGst: formatCurrency(totalCalculatedGst),
-    sgst: formatCurrency(sgst),
-    cgst: formatCurrency(cgst),
-    igst: formatCurrency(igst),
-  };
-};
-
-// Helper function to calculate the final total, applying manual overrides
-const calculateTotal = (subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage) => {
-  let taxToUse = 0;
-
-  if (manualGstAmount !== null && manualGstAmount !== undefined) {
-      // If overall manual total GST (absolute amount) is set, use it directly (highest precedence)
-      taxToUse = manualGstAmount;
-  } else if (gstType === "intrastate" && (manualSgstPercentage !== null || manualCgstPercentage !== null)) {
-      // If intrastate and manual SGST/CGST percentages are set, calculate their absolute values
-      const manualSgstValue = manualSgstPercentage !== null && manualSgstPercentage !== undefined ? (subTotal * (manualSgstPercentage / 100)) : gstBreakdown.sgst;
-      const manualCgstValue = manualCgstPercentage !== null && manualCgstPercentage !== undefined ? (subTotal * (manualCgstPercentage / 100)) : gstBreakdown.cgst;
-      taxToUse = manualSgstValue + manualCgstValue;
-  } else {
-      // Otherwise, use the automatically calculated total GST
-      taxToUse = gstBreakdown.totalGst;
-  }
-
-  return formatCurrency(subTotal + taxToUse);
-};
-
-
-// GET all quotations with pagination
+// GET all quotations
 exports.getAll = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1; // Default to page 1
-    const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
-    const skip = (page - 1) * limit;
-
-    const totalQuotations = await Quotation.countDocuments(); // Get total count for pagination info
-    const quotations = await Quotation.find()
-      .populate('businessId', 'contactName email phone address gstin mobileNumber businessName')
-      .populate('followUps.addedBy', 'name email')
-      .sort({ createdAt: -1 })
-      .skip(skip) // Skip documents based on current page
-      .limit(limit); // Limit the number of documents per page
-
-    res.json({
-      quotations,
-      currentPage: page,
-      totalPages: Math.ceil(totalQuotations / limit),
-      totalItems: totalQuotations,
-      perPage: limit,
-    });
+    const quotations = await Quotation.find().sort({ createdAt: -1 }); // Fetch all quotations, sorted by creation date descending
+    res.json(quotations);
   } catch (err) {
-    console.error("Error fetching all quotations:", err);
-    res.status(500).json({ error: 'Failed to fetch quotations. Please try again later.' });
+    console.error("Error fetching all quotations:", err); // Log the detailed error for debugging
+    res.status(500).json({ error: 'Failed to fetch quotations. Please try again later.' }); // More informative error for client
   }
 };
 
-// POST create new quotation
+// POST create a quotation with auto-generated quotation number
 exports.create = async (req, res) => {
   try {
-    const { items, businessId, customerName, customerEmail, mobileNumber, gstin, gstType, quotationDate, validityDays, quotationNotes, businessInfo, manualGstAmount, manualSgstPercentage, manualCgstPercentage } = req.body;
-
-    // Fetch the last quotation to determine the next quotation number
+    // Find the last quotation to determine the next sequential number
     const lastQuotation = await Quotation.findOne().sort({ createdAt: -1 });
-    let nextQuotationNumber;
+    let nextNumber = "Q-0001"; // Default starting quotation number
+
     if (lastQuotation && lastQuotation.quotationNumber) {
-      const lastNumber = parseInt(lastQuotation.quotationNumber.split('-').pop());
-      nextQuotationNumber = `Q-${(lastNumber + 1).toString().padStart(5, '0')}`;
-    } else {
-      nextQuotationNumber = 'Q-00001';
+      // Extract the numeric part, increment it, and reformat with leading zeros
+      const lastNumber = parseInt(lastQuotation.quotationNumber.split('-')[1], 10);
+      const newNumber = lastNumber + 1;
+      nextNumber = `Q-${String(newNumber).padStart(4, '0')}`;
     }
 
-    // Calculate subTotal
-    const subTotal = calculateSubTotal(items);
-
-    // Calculate GST breakdown
-    const gstBreakdown = calculateTotalGst(items, gstType);
-
-    // Calculate total, applying manual overrides if present
-    const total = calculateTotal(subTotal, gstBreakdown, gstType, manualGstAmount, manualSgstPercentage, manualCgstPercentage);
-
+    // Create a new Quotation instance with data from request body and generated number
     const newQuotation = new Quotation({
-      quotationNumber: nextQuotationNumber,
-      businessId,
-      customerName: customerName || (businessId ? (await Business.findById(businessId))?.contactName : null),
-      customerEmail: customerEmail || (businessId ? (await Business.findById(businessId))?.email : null),
-      mobileNumber: mobileNumber || (businessId ? (await Business.findById(businessId))?.mobileNumber || (await Business.findById(businessId))?.phone : null),
-      gstin: gstin || (businessId ? (await Business.findById(businessId))?.gstin : null),
-      gstType,
-      items,
-      subTotal,
-      gstBreakdown,
-      total,
-      date: quotationDate || new Date(),
-      validityDays,
-      notes: quotationNotes ? [{ text: quotationNotes, author: req.user.name }] : [], // Assuming req.user is populated by auth middleware
-      businessInfo,
-      status: 'Pending',
-      manualGstAmount,
-      manualSgstPercentage,
-      manualCgstPercentage,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      ...req.body,
+      quotationNumber: nextNumber
     });
 
-    await newQuotation.save();
-    res.status(201).json(newQuotation);
+    // Save the new quotation to the database
+    const saved = await newQuotation.save();
+    res.status(201).json(saved); // Respond with the created quotation and 201 Created status
   } catch (err) {
-    console.error("Error creating quotation:", err);
-    if (err.code === 11000) { // Duplicate key error
-      res.status(400).json({ error: 'A quotation with this number already exists. Please try again.' });
-    } else {
-      res.status(500).json({ error: 'Failed to create quotation. Please try again later.' });
+    // Handle specific MongoDB duplicate key error (error code 11000)
+    if (err.code === 11000) {
+        console.error("Duplicate quotation number attempt or race condition:", err); // Log the specific error
+        return res.status(409).json({ error: 'A quotation with this number was just created. Please try generating a new one or refresh.' });
     }
+    // Handle other validation or database errors
+    console.error("Error creating quotation:", err); // Log the detailed error for debugging
+    res.status(400).json({ error: 'Failed to create quotation. Please check your input and try again.' });
   }
 };
 
-// PUT update a quotation by ID
+// PUT update a quotation
 exports.update = async (req, res) => {
   try {
-    const { id } = req.params;
-    const updateData = req.body;
-
-    const quotation = await Quotation.findById(id);
-    if (!quotation) {
-      return res.status(404).json({ message: 'Quotation not found.' });
+    // Find the quotation by ID and update it. 'new: true' returns the updated document.
+    const updated = await Quotation.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true }); // runValidators to ensure schema validation on update
+    if (!updated) {
+      return res.status(404).json({ error: 'Quotation not found.' }); // If no quotation found for the ID
     }
-
-    // Recalculate totals if items or GST related fields are updated
-    if (updateData.items || updateData.gstType !== undefined || updateData.manualGstAmount !== undefined || updateData.manualSgstPercentage !== undefined || updateData.manualCgstPercentage !== undefined) {
-      const itemsToUse = updateData.items || quotation.items;
-      const gstTypeToUse = updateData.gstType !== undefined ? updateData.gstType : quotation.gstType;
-      const manualGstAmountToUse = updateData.manualGstAmount !== undefined ? updateData.manualGstAmount : quotation.manualGstAmount;
-      const manualSgstPercentageToUse = updateData.manualSgstPercentage !== undefined ? updateData.manualSgstPercentage : quotation.manualSgstPercentage;
-      const manualCgstPercentageToUse = updateData.manualCgstPercentage !== undefined ? updateData.manualCgstPercentage : quotation.manualCgstPercentage;
-
-      const newSubTotal = calculateSubTotal(itemsToUse);
-      const newGstBreakdown = calculateTotalGst(itemsToUse, gstTypeToUse);
-      const newTotal = calculateTotal(newSubTotal, newGstBreakdown, gstTypeToUse, manualGstAmountToUse, manualSgstPercentageToUse, manualCgstPercentageToUse);
-
-      quotation.subTotal = newSubTotal;
-      quotation.gstBreakdown = newGstBreakdown;
-      quotation.total = newTotal;
-      quotation.items = itemsToUse; // Update items if they were changed
-      quotation.gstType = gstTypeToUse;
-      quotation.manualGstAmount = manualGstAmountToUse;
-      quotation.manualSgstPercentage = manualSgstPercentageToUse;
-      quotation.manualCgstPercentage = manualCgstPercentageToUse;
-    }
-
-    // Handle notes separately if they are being added
-    if (updateData.notes && updateData.notes.length > 0) {
-      // Assuming 'notes' here refers to adding new notes, not replacing old ones
-      // You might need more sophisticated logic here based on your frontend's note management
-      updateData.notes.forEach(newNote => {
-        if (newNote.text) {
-          quotation.notes.push({
-            text: newNote.text,
-            author: req.user.name, // Assuming req.user is populated by auth middleware
-            timestamp: new Date()
-          });
-        }
-      });
-      delete updateData.notes; // Remove from updateData to prevent direct overwrite
-    }
-
-
-    // Apply other updates
-    Object.keys(updateData).forEach(key => {
-      // Prevent overwriting calculated fields or specific fields not meant for direct update here
-      if (key !== 'items' && key !== 'subTotal' && key !== 'gstBreakdown' && key !== 'total' && key !== 'createdAt' && key !== 'notes') {
-        quotation[key] = updateData[key];
-      }
-    });
-
-    quotation.updatedAt = new Date();
-    await quotation.save();
-
-    // Re-populate for response
-    const updatedQuotation = await Quotation.findById(id)
-      .populate('businessId', 'contactName email phone address gstin mobileNumber businessName')
-      .populate('followUps.addedBy', 'name email');
-
-    res.json(updatedQuotation);
+    res.json(updated); // Respond with the updated quotation
   } catch (err) {
-    console.error("Error updating quotation:", err);
-    res.status(500).json({ error: 'Failed to update quotation. Please try again later.' });
+    console.error("Error updating quotation:", err); // Log the detailed error for debugging
+    res.status(400).json({ error: 'Failed to update quotation. Please check your input.' });
   }
 };
 
-
-// DELETE a quotation by ID
+// DELETE a quotation
 exports.remove = async (req, res) => {
   try {
-    const { id } = req.params;
-    const quotation = await Quotation.findByIdAndDelete(id);
-    if (!quotation) {
-      return res.status(404).json({ message: 'Quotation not found.' });
+    // Find the quotation by ID and delete it
+    const deleted = await Quotation.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Quotation not found.' }); // If no quotation found for the ID
     }
-    res.status(200).json({ message: 'Quotation deleted successfully.' });
+    res.json({ message: "Quotation deleted successfully." }); // Respond with success message
   } catch (err) {
-    console.error("Error deleting quotation:", err);
-    res.status(500).json({ error: 'Failed to delete quotation. Please try again later.' });
+    console.error("Error deleting quotation:", err); // Log the detailed error for debugging
+    res.status(400).json({ error: 'Failed to delete quotation.' });
   }
 };
 
-// GET active businesses (for selection in quotation form, etc.)
+// GET active businesses
 exports.getActiveBusinesses = async (req, res) => {
   try {
-    const activeBusinesses = await Business.find({ status: 'Active' }).select('_id businessName contactName email phone mobileNumber gstin address');
-    res.json(activeBusinesses);
+    // Ensure BusinessAccount model is imported if this function is used.
+    // If not, you might need to import it here or move this function.
+    // const BusinessAccount = require('../models/BusinessAccount'); // Uncomment if needed
+    const businesses = await Business.find({ status: 'Active' }); // Find businesses with 'Active' status
+    res.json(businesses);
   } catch (err) {
-    console.error("Error fetching active businesses:", err);
+    console.error("Error fetching active businesses:", err); // Log the detailed error for debugging
     res.status(500).json({ error: 'Failed to fetch active businesses.' });
   }
 };
 
-// Get quotations by businessId
+// GET quotations by business ID
 exports.getQuotationsByBusinessId = async (req, res) => {
   try {
-    const { id } = req.params;
-    const quotations = await Quotation.find({ businessId: id })
-      .populate('businessId', 'contactName email phone address gstin mobileNumber businessName')
-      .populate('followUps.addedBy', 'name email')
-      .sort({ createdAt: -1 });
+    // Find quotations that belong to a specific businessId
+    const quotations = await Quotation.find({ businessId: req.params.id });
     res.json(quotations);
   } catch (err) {
-    console.error("Error fetching quotations by business ID:", err);
-    res.status(500).json({ error: 'Failed to fetch quotations for the business.' });
+    console.error("Error fetching quotations by business ID:", err); // Log the detailed error for debugging
+    res.status(500).json({ message: 'Failed to fetch quotations for the specified business.' });
   }
 };
 
+// --- NEW FOLLOW-UP ENDPOINTS FOR QUOTATIONS ---
 
-// --- FOLLOW-UP MANAGEMENT ---
-
-// Get all follow-ups for a specific quotation (optional, could be done via main get)
+// Get follow-ups by quotation ID
 exports.getFollowUpsByQuotationId = async (req, res) => {
   try {
-    const { id } = req.params;
-    const quotation = await Quotation.findById(id).select('followUps').populate('followUps.addedBy', 'name email');
+    const quotation = await Quotation.findById(req.params.id)
+      .populate('followUps.addedBy', 'name email'); // Populate user details if 'addedBy' is a ref to User
+
     if (!quotation) {
       return res.status(404).json({ message: 'Quotation not found.' });
     }
-    res.status(200).json(quotation.followUps);
+    res.json(quotation.followUps || []);
   } catch (err) {
-    console.error("Error fetching follow-ups:", err);
+    console.error("Error fetching follow-ups for quotation:", err);
     res.status(500).json({ message: 'Failed to fetch follow-ups.', error: err.message });
   }
 };
 
+// Add a follow-up to a quotation
+// In quotationController.js
+
 // Add a new follow-up to a specific quotation
 exports.addFollowUp = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { date, note, status } = req.body; // status can be 'Pending', 'Completed', 'Canceled'
+  const { id } = req.params;
+  // Destructure 'status' from req.body
+  const { date, note, addedBy, status } = req.body;
 
+  try {
     const quotation = await Quotation.findById(id);
     if (!quotation) {
-      return res.status(404).json({ message: 'Quotation not found.' });
+      return res.status(404).json({ message: 'Quotation not found' });
     }
 
-    quotation.followUps.push({
-      date,
-      note,
-      status: status || 'Pending', // Default status
-      addedBy: req.user._id, // Assuming user ID is available from authentication middleware
-      timestamp: new Date()
-    });
-
+    // Create new follow-up object including status
+    const newFollowUp = { date, note, addedBy, status }; // Make sure 'status' is included here
+    quotation.followUps.push(newFollowUp);
     await quotation.save();
 
-    // Re-populate the addedBy field for the response
+    // After saving, re-fetch to get populated 'addedBy' if needed for response
     const updatedQuotation = await Quotation.findById(id)
-      .populate('followUps.addedBy', 'name email'); // Populate only the 'addedBy' in followUps
+      .populate('followUps.addedBy', 'name email');
 
     res.status(200).json({ message: 'Follow-up added successfully.', followUps: updatedQuotation.followUps });
   } catch (err) {
@@ -317,6 +157,7 @@ exports.addFollowUp = async (req, res) => {
 exports.updateFollowUp = async (req, res) => {
   try {
     const { id, index } = req.params;
+    // Destructure 'status' from req.body
     const { date, note, status } = req.body;
 
     const quotation = await Quotation.findById(id);
@@ -326,13 +167,13 @@ exports.updateFollowUp = async (req, res) => {
 
     quotation.followUps[index].date = date;
     quotation.followUps[index].note = note;
-    if (status !== undefined) { // Only update status if explicitly provided
-      quotation.followUps[index].status = status;
-    }
+    // Update the status
+    quotation.followUps[index].status = status;
     await quotation.save();
 
+    // After saving, re-fetch to get populated 'addedBy' if needed for response
     const updatedQuotation = await Quotation.findById(id)
-      .populate('followUps.addedBy', 'name email');
+        .populate('followUps.addedBy', 'name email');
 
     res.status(200).json({ message: 'Follow-up updated successfully.', followUps: updatedQuotation.followUps });
   } catch (err) {
@@ -340,22 +181,22 @@ exports.updateFollowUp = async (req, res) => {
     res.status(500).json({ message: 'Failed to update follow-up.', error: err.message });
   }
 };
-
-// Delete a specific follow-up by its index from a quotation
+// Delete a follow-up by index on a quotation
 exports.deleteFollowUp = async (req, res) => {
   try {
-    const { id, index } = req.params;
+    const { id, index } = req.params; // id is Quotation ID
 
     const quotation = await Quotation.findById(id);
     if (!quotation || !quotation.followUps[index]) {
       return res.status(404).json({ message: 'Follow-up not found.' });
     }
 
-    quotation.followUps.splice(index, 1);
+    quotation.followUps.splice(index, 1); // Remove item from array
     await quotation.save();
 
+    // After saving, re-fetch to get populated 'addedBy' if needed for response
     const updatedQuotation = await Quotation.findById(id)
-      .populate('followUps.addedBy', 'name email');
+        .populate('followUps.addedBy', 'name email');
 
     res.status(200).json({ message: 'Follow-up deleted successfully.', followUps: updatedQuotation.followUps });
   } catch (err) {

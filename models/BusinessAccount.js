@@ -1,3 +1,5 @@
+// File: BusinessAccount.js
+
 const mongoose = require('mongoose');
 
 const noteSchema = new mongoose.Schema({
@@ -18,34 +20,45 @@ const followUpSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 
+const contactPersonSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String },
+    phoneNumber: { type: String },
+}, { _id: true });
+
 const businessAccountSchema = new mongoose.Schema({
-    businessName: { type: String, required: true, unique: true }, // Added unique: true
-    sourceType: {
-        type: String,
-        enum: ['Direct', 'socialmedia', 'online', 'client', 'tradefair', 'Other'],
-        default: 'Other'
-    },
-    gstNumber: { type: String, required: false },
+    businessName: { type: String, required: true, unique: true },
     contactName: { type: String, required: true },
-    email: { type: String, required: true },
-    mobileNumber: { type: String, required: true },
-    phoneNumber: String,
-    followUps: [followUpSchema],
-    addressLine1: { type: String, required: true },
-    addressLine2: String,
-    addressLine3: String,
-    landmark: String,
-    city: { type: String, required: true },
-    pincode: { type: Number, required: true },
-    state: { type: String, required: true },
-    country: { type: String, required: true },
-    website: String,
-    type: { type: String, enum: ['Hot', 'Warm', 'Cold'], required: true },
+    contactEmail: { type: String },
+    contactNumber: { type: String, required: true },
+    address: { type: String },
+    sourceType: { type: String, default: 'Direct' },
+    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    status: {
+        type: String,
+        enum: ['Active', 'Pipeline', 'Quotations', 'Customer', 'Closed', 'TargetLeads'],
+        default: 'Active'
+    },
     notes: [noteSchema],
-    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    status: { type: String, enum: ['Active', 'Inactive', 'Pipeline', 'Closed', 'Customer', 'Quotations'], default: 'Active' },
-    isCustomer: { type: Boolean, default: false }, // Indicates if the account is a customer
-    selectedProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },    // NEW: Reference to Product
-}, { timestamps: true });
+    followUps: [followUpSchema],
+    selectedProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    totalPrice: { type: Number, default: 0 },
+    zone: { type: mongoose.Schema.Types.ObjectId, ref: 'Zone' },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+    contactPerson: { type: String },
+    typeOfLead: [{
+        type: String,
+        enum: ['Regular', 'Government', 'Occupational']
+    }],
+    gstNumber: String,
+    
+    quotations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quotation' }]
+});
+
+businessAccountSchema.pre('save', function (next) {
+    this.updatedAt = new Date();
+    next();
+});
 
 module.exports = mongoose.model('BusinessAccount', businessAccountSchema);
